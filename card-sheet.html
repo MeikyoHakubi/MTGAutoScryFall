@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card Sheet</title>
+<style>
+  /* Layout: deck list on the left, sheet text and failure log on the right; one column on narrow screens. */
+  :root {
+    --bg: #eef1f6;
+    --surface: #fbfcfe;
+    --ink: #141c29;
+    --muted: #566277;
+    --line: #cdd5e1;
+    --accent: #274b8a;
+    --accent-ink: #ffffff;
+    --warn: #a2432b;
+    --ok: #2c6a47;
+    --ui: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e131b;
+      --surface: #151c27;
+      --ink: #e3e9f2;
+      --muted: #93a0b4;
+      --line: #293445;
+      --accent: #8cb0ee;
+      --accent-ink: #0b1424;
+      --warn: #f0a58e;
+      --ok: #8fd0a9;
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.6 var(--ui);
+    padding-block: 1.5rem 3rem;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; display: grid; gap: 1.25rem; }
+
+  header.top { display: grid; gap: .35rem; }
+  .brand { display: flex; align-items: center; gap: .7rem; }
+  .pips { display: inline-flex; gap: 4px; }
+  .pips i {
+    width: 12px; height: 12px; border-radius: 50%;
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / .22);
+  }
+  .pips i:nth-child(1) { background: #f3efc9; }
+  .pips i:nth-child(2) { background: #b9d4ec; }
+  .pips i:nth-child(3) { background: #a9a29c; }
+  .pips i:nth-child(4) { background: #e8a487; }
+  .pips i:nth-child(5) { background: #9fc29a; }
+  h1 { margin: 0; font-size: 1.35rem; letter-spacing: .02em; line-height: 1.2; }
+  .lede { margin: 0; color: var(--muted); max-width: 46rem; }
+
+  .grid { display: grid; gap: 1.25rem; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); } }
+  .pane { display: grid; gap: .6rem; align-content: start; min-width: 0; }
+  .pane-head { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+  .pane-head label, .pane-head h2 {
+    margin: 0; font-size: .8125rem; font-weight: 600; letter-spacing: .06em; color: var(--muted);
+  }
+
+  textarea {
+    width: 100%; min-height: 20rem; resize: vertical;
+    padding: .75rem .85rem;
+    font: 13px/1.55 var(--mono);
+    color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  #out { white-space: pre; overflow: auto; }
+
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+  button {
+    font: inherit; font-size: .875rem; cursor: pointer;
+    padding: .5rem .9rem; border-radius: 6px;
+    border: 1px solid var(--line); background: transparent; color: var(--ink);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.link { border: 0; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-size: .8125rem; }
+  button:disabled { opacity: .55; cursor: default; }
+  button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  #status { color: var(--muted); font-size: .875rem; min-width: 0; overflow-wrap: anywhere; }
+  #status.err { color: var(--warn); }
+
+  .log { display: grid; gap: .4rem; margin-top: .4rem; }
+  #log {
+    margin: 0; padding: .75rem .85rem; min-height: 4.5rem; max-height: 14rem; overflow: auto;
+    font: 12.5px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px; color: var(--muted);
+  }
+  #log.has-fail { color: var(--ink); border-color: var(--warn); }
+  #log.has-fail::first-line { color: var(--warn); font-weight: 600; }
+  #log.all-ok::first-line { color: var(--ok); }
+
+  @media (prefers-reduced-motion: no-preference) { button { transition: opacity .15s; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="pips" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <h1>Card Sheet</h1>
+    </div>
+    <p class="lede">デッキリストの各カードの情報をScryfallから取得し、AIに貼り付けやすいテキストにまとめます。</p>
+  </header>
+
+  <main class="grid">
+    <section class="pane" aria-labelledby="deck-label">
+      <div class="pane-head">
+        <label id="deck-label" for="deck">デッキリスト</label>
+        <button type="button" id="sample" class="link">サンプルを入れる</button>
+      </div>
+      <textarea id="deck" spellcheck="false" autocapitalize="off" autocomplete="off"
+        placeholder="4 Lightning Bolt&#10;4 Elvish Mystic (M21) 197&#10;Fire // Ice&#10;&#10;Sideboard&#10;2 Pyroblast"></textarea>
+      <div class="actions">
+        <button type="button" id="run" class="primary">カード情報を取得</button>
+        <button type="button" id="clear">クリア</button>
+        <span id="status" role="status" aria-live="polite">英語のカード名で貼り付けてください。</span>
+      </div>
+    </section>
+
+    <section class="pane" aria-labelledby="out-label">
+      <div class="pane-head">
+        <label id="out-label" for="out">出力</label>
+        <button type="button" id="copy" disabled>コピー</button>
+      </div>
+      <textarea id="out" readonly wrap="off" spellcheck="false" placeholder="取得した結果がここに表示されます。"></textarea>
+      <div class="log">
+        <div class="pane-head"><h2>ログ</h2></div>
+        <pre id="log" aria-live="polite">失敗したカードは、取得の最後にまとめてここへ表示されます。</pre>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+'use strict';
+
+/* ---------- Core: parsing, Scryfall lookup, formatting (no DOM) ---------- */
+
+const API_URL = 'https://api.scryfall.com/cards/collection';
+const BATCH_SIZE = 75;     // Scryfall's cap per collection request
+const BATCH_GAP_MS = 550;  // collection endpoint allows about 2 requests per second
+const COLOR_ORDER = ['W', 'U', 'B', 'R', 'G'];
+const HEADINGS = new Set([
+  'deck', 'maindeck', 'main deck', 'mainboard', 'main', 'sideboard', 'side',
+  'commander', 'companion', 'maybeboard', 'maybe', 'considering', 'about'
+]);
+const HEADER_ROW = 'Name | Color | Color Identity | Mana (MV) | Legendary | Type | Subtype | P/T | Text';
+
+function norm(s) {
+  return String(s)
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[‘’]/g, "'")
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/* Arena / MTGO style lists. Counts, set codes and headings are read and dropped; only names are kept. */
+function parseDeck(text) {
+  const entries = [];
+  const unreadable = [];
+  const seen = new Set();
+  let inAbout = false;
+  for (const rawLine of String(text).split(/\r?\n/)) {
+    let line = rawLine.trim();
+    if (!line) { inAbout = false; continue; }
+    if (inAbout) continue;
+    if (line.startsWith('//') || line.startsWith('#')) continue;
+    const head = line.replace(/\s*\(\d+\)\s*$/, '').replace(/\s*:\s*$/, '').trim().toLowerCase();
+    if (HEADINGS.has(head)) { if (head === 'about') inAbout = true; continue; }
+    line = line.replace(/^SB:\s*/i, '');
+    const m = line.match(/^(\d{1,3})\s*[xX]?\s+(.+)$/);
+    let name = m ? m[2] : line;
+    name = name.replace(/\s+\*[A-Za-z]\*\s*$/, '');
+    name = name.replace(/\s+\([A-Za-z0-9]{2,6}\)(?:\s+[\w★†*-]+)?\s*$/, '');
+    name = name.replace(/\s*\/{2,3}\s*/g, ' // ').trim();
+    if (!name) { unreadable.push(rawLine.trim()); continue; }
+    const key = norm(name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push({ name });
+  }
+  return { entries, unreadable };
+}
+
+function cardKeys(card) {
+  const keys = [norm(card.name || '')];
+  for (const f of card.card_faces || []) if (f && f.name) keys.push(norm(f.name));
+  return keys;
+}
+
+/* ok: items that were not reported in not_found, in request order. */
+function pairResults(ok, data, results, failed) {
+  if (data.length === ok.length) {
+    ok.forEach((c, k) => { results[c.idx] = data[k]; });
+    return;
+  }
+  const byKey = new Map();
+  for (const card of data) for (const k of cardKeys(card)) if (!byKey.has(k)) byKey.set(k, card);
+  for (const c of ok) {
+    const card = byKey.get(norm(c.query)) || byKey.get(norm(c.query.split(' // ')[0]));
+    if (card) results[c.idx] = card;
+    else failed.set(c.idx, 'レスポンスと照合できません');
+  }
+}
+
+async function resolveAll(entries, opts = {}) {
+  const fetchFn = opts.fetchFn || ((...a) => fetch(...a));
+  const sleep = opts.sleep || (ms => new Promise(r => setTimeout(r, ms)));
+  const onProgress = opts.onProgress || (() => {});
+  const results = new Array(entries.length).fill(null);
+  const failed = new Map();
+  let calls = 0;
+
+  async function lookup(items, phase) {
+    const unresolved = [];
+    let done = 0;
+    for (let i = 0; i < items.length; i += BATCH_SIZE) {
+      const chunk = items.slice(i, i + BATCH_SIZE);
+      if (calls++ > 0) await sleep(BATCH_GAP_MS);
+      onProgress({ phase, done, total: items.length });
+      let body;
+      try {
+        const res = await fetchFn(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ identifiers: chunk.map(c => ({ name: c.query })) })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        body = await res.json();
+      } catch (err) {
+        const why = '通信エラー: ' + (err && err.message ? err.message : String(err));
+        for (const c of chunk) failed.set(c.idx, why);
+        done += chunk.length;
+        continue;
+      }
+      const nf = new Set((body.not_found || []).map(x => norm((x && x.name) || '')));
+      const ok = [];
+      for (const c of chunk) (nf.has(norm(c.query)) ? unresolved : ok).push(c);
+      pairResults(ok, body.data || [], results, failed);
+      done += chunk.length;
+    }
+    return unresolved;
+  }
+
+  const first = entries.map((e, idx) => ({ idx, query: e.name }));
+  const unresolved = await lookup(first, 'lookup');
+
+  // Two-faced names ("A // B") that Scryfall did not match are asked again by front face.
+  const retry = [];
+  for (const u of unresolved) {
+    const name = entries[u.idx].name;
+    const front = name.split(' // ')[0];
+    if (front !== name) retry.push({ idx: u.idx, query: front });
+    else failed.set(u.idx, 'not_found');
+  }
+  if (retry.length) {
+    const still = await lookup(retry, 'retry');
+    for (const u of still) failed.set(u.idx, 'not_found');
+  }
+
+  const failures = [...failed.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([idx, reason]) => ({ name: entries[idx].name, reason }));
+  return { results, failures };
+}
+
+function colorString(colors) {
+  const list = COLOR_ORDER.filter(c => (colors || []).includes(c));
+  return list.length ? list.join('') : 'C';
+}
+
+function deriveColors(cost) {
+  const found = new Set();
+  for (const m of String(cost || '').matchAll(/\{([^}]+)\}/g)) {
+    for (const ch of m[1]) if (COLOR_ORDER.includes(ch)) found.add(ch);
+  }
+  return [...found];
+}
+
+function mvFromCost(cost) {
+  let total = 0;
+  for (const m of String(cost || '').matchAll(/\{([^}]+)\}/g)) {
+    const s = m[1];
+    if (/^\d+$/.test(s)) total += Number(s);
+    else if (/^[XYZ]$/.test(s)) total += 0;
+    else if (/^H/.test(s)) total += 0.5;
+    else if (/^2\//.test(s)) total += 2;
+    else total += 1;
+  }
+  return total;
+}
+
+function formatFace(card, face) {
+  const src = face || card;
+  const manaCost = src.mana_cost || '';
+  let colors;
+  if (face && Array.isArray(face.colors)) colors = face.colors;
+  else if (face && manaCost) colors = deriveColors(manaCost);
+  else colors = card.colors || deriveColors(manaCost);
+
+  let mv;
+  if (!face) mv = card.cmc;
+  else if (Number.isFinite(face.cmc)) mv = face.cmc;
+  else if (manaCost) mv = mvFromCost(manaCost);
+  else mv = card.layout === 'transform' ? card.cmc : 0;
+
+  const typeLine = (face ? (face.type_line || '') : (card.type_line || '')).trim();
+  const [left, right] = typeLine.split(/\s+—\s+/);
+  const legendary = /\bLegendary\b/.test(left || '');
+  const type = (left || '').replace(/\bLegendary\b\s*/, '').trim() || '-';
+  const subtype = (right || '').trim() || '-';
+
+  const hasPT = src.power != null && src.toughness != null;
+  const pt = hasPT ? src.power + '/' + src.toughness : '-';
+  const text = String(src.oracle_text || '').replace(/\s*\n\s*/g, ' / ').trim() || '-';
+
+  return [
+    src.name,
+    colorString(colors),
+    colorString(card.color_identity),
+    (manaCost || '-') + ' (' + (mv == null ? '-' : mv) + ')',
+    legendary ? 'Legendary' : '-',
+    type,
+    subtype,
+    pt,
+    text
+  ].join(' | ');
+}
+
+function rowsForCard(card) {
+  const faces = Array.isArray(card.card_faces) && card.card_faces.length > 1 ? card.card_faces : [null];
+  return faces.map(f => formatFace(card, f));
+}
+
+function buildSheet(results) {
+  const seen = new Set();
+  const rows = [];
+  for (const card of results) {
+    if (!card) continue;
+    const key = card.oracle_id || card.id || card.name;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(...rowsForCard(card));
+  }
+  return rows.length ? [HEADER_ROW, ...rows].join('\n') : '';
+}
+
+function buildLog(failures, unreadable) {
+  const items = failures.map(f => '- ' + f.name + ' (' + f.reason + ')')
+    .concat((unreadable || []).map(l => '- ' + l + ' (読み取れない行)'));
+  return ['取得失敗: ' + items.length + '件', ...items].join('\n');
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { parseDeck, resolveAll, buildSheet, buildLog, formatFace, norm, BATCH_SIZE };
+}
+
+/* ---------- UI ---------- */
+
+if (typeof document !== 'undefined') {
+  const $ = id => document.getElementById(id);
+  const deck = $('deck'), out = $('out'), log = $('log'), status = $('status');
+  const runBtn = $('run'), clearBtn = $('clear'), copyBtn = $('copy'), sampleBtn = $('sample');
+  const SAMPLE = [
+    '4 Lightning Bolt',
+    '4 Elvish Mystic',
+    '2 Delver of Secrets // Insectile Aberration',
+    '1 Fire // Ice',
+    '1 Isamaru, Hound of Konda',
+    '',
+    'Sideboard',
+    '2 Pyroblast'
+  ].join('\n');
+  const LOG_IDLE = '失敗したカードは、取得の最後にまとめてここへ表示されます。';
+
+  function setStatus(msg, isErr) {
+    status.textContent = msg;
+    status.classList.toggle('err', !!isErr);
+  }
+
+  async function run() {
+    const { entries, unreadable } = parseDeck(deck.value);
+    if (!entries.length) {
+      setStatus('デッキリストを入力してください。', true);
+      return;
+    }
+    runBtn.disabled = true;
+    copyBtn.disabled = true;
+    out.value = '';
+    log.className = '';
+    log.textContent = '取得中です。';
+    setStatus('取得中… 0/' + entries.length);
+    try {
+      const { results, failures } = await resolveAll(entries, {
+        onProgress: p => setStatus(p.phase === 'retry'
+          ? '両面カードを再照合中…'
+          : '取得中… ' + p.done + '/' + p.total)
+      });
+      const sheet = buildSheet(results);
+      const found = results.filter(Boolean).length;
+      out.value = sheet;
+      copyBtn.disabled = !sheet;
+      const failCount = failures.length + unreadable.length;
+      log.textContent = buildLog(failures, unreadable);
+      log.className = failCount ? 'has-fail' : 'all-ok';
+      setStatus(entries.length + '件中 ' + found + '件を取得、失敗 ' + failCount + '件', failCount > 0 && !found);
+    } catch (err) {
+      log.className = 'has-fail';
+      log.textContent = '取得失敗: 処理を完了できませんでした\n- ' + (err && err.message ? err.message : err);
+      setStatus('処理を完了できませんでした。', true);
+    } finally {
+      runBtn.disabled = false;
+    }
+  }
+
+  async function copyOut() {
+    const text = out.value;
+    if (!text) return;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch (e) {
+      out.focus();
+      out.select();
+      try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+    }
+    const label = copyBtn.textContent;
+    copyBtn.textContent = ok ? 'コピーしました' : '選択しました。手動でコピーしてください';
+    setTimeout(() => { copyBtn.textContent = label === 'コピー' ? label : 'コピー'; }, 2000);
+  }
+
+  runBtn.addEventListener('click', run);
+  copyBtn.addEventListener('click', copyOut);
+  sampleBtn.addEventListener('click', () => {
+    deck.value = SAMPLE;
+    setStatus('サンプルを入れました。取得を押してください。');
+  });
+  clearBtn.addEventListener('click', () => {
+    deck.value = '';
+    out.value = '';
+    log.className = '';
+    log.textContent = LOG_IDLE;
+    copyBtn.disabled = true;
+    setStatus('英語のカード名で貼り付けてください。');
+    deck.focus();
+  });
+}
+</script>
+</body>
+</html>
