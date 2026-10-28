@@ -159,7 +159,7 @@ const HEADINGS = new Set([
   'deck', 'maindeck', 'main deck', 'mainboard', 'main', 'sideboard', 'side',
   'commander', 'companion', 'maybeboard', 'maybe', 'considering', 'about'
 ]);
-const HEADER_ROW = 'Name | Color | Color Identity | Mana (MV) | Legendary | Type | Subtype | P/T | Text';
+const HEADER_ROW = 'Name | Color | Color Identity | Mana (MV) | Legendary | Type | Subtype | P/T | Loyalty | Text';
 
 function norm(s) {
   return String(s)
@@ -326,6 +326,7 @@ function formatFace(card, face) {
 
   const hasPT = src.power != null && src.toughness != null;
   const pt = hasPT ? src.power + '/' + src.toughness : '-';
+  const loyalty = src.loyalty != null && src.loyalty !== '' ? String(src.loyalty) : '-';
   const text = String(src.oracle_text || '').replace(/\s*\n\s*/g, ' / ').trim() || '-';
 
   return [
@@ -337,6 +338,7 @@ function formatFace(card, face) {
     type,
     subtype,
     pt,
+    loyalty,
     text
   ].join(' | ');
 }
